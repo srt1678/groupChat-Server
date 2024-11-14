@@ -10,6 +10,7 @@ const io = new Server(server, {
 
 const port = 3000;
 let users = [];
+const userSocketMap = new Map();
 
 io.on("connection", (socket) => {
 	try {
@@ -19,6 +20,7 @@ io.on("connection", (socket) => {
 			console.log(`${name} has joined the chat.`);
 			socket.username = name;
 			users.push(name);
+      userSocketMap.set(name, socket.id);
 			socket.join("All");
 			io.emit("updateUsers", users);
 			socket.emit("message", {
@@ -39,22 +41,27 @@ io.on("connection", (socket) => {
 			if (userIndex !== -1) {
 				const disconnectedUser = users.splice(userIndex, 1)[0];
 				io.emit("updateUsers", users);
-				io.emit("message", `${disconnectedUser} has left the chat.`);
+				socket.broadcast.emit("message", {content: `${socket.username} has left the chat.`, sender: "System", room: "All"});
 			}
 		});
 
 		socket.on("message", (msgObj) => {
-			const { content, sender, room } = msgObj;
-			if (room === "All") {
-				socket.emit("message", msgObj);
-				socket.broadcast.emit("message", msgObj);
-			} else {
-        const participants = [sender, ...room.split('-')].sort();
-        const privateRoom = `${participants[0]}-${participants[1]}`
-				socket.join(privateRoom);
-        io.to(privateRoom).emit("message", msgObj);
-			}
-		});
+      const { content, sender, room } = msgObj;
+      if (room === "All") {
+        io.to("All").emit("message", msgObj);
+      } else {
+        // Handle private messages
+        const participants = room.split('-');
+        const receiver = participants.find(user => user !== sender);
+        const receiverSocketId = userSocketMap.get(receiver);
+        
+        if (receiverSocketId) {
+          // Send to both sender and receiver
+          io.to(socket.id).emit("message", msgObj);
+          io.to(receiverSocketId).emit("message", msgObj);
+        }
+      }
+    });
 	} catch (error) {
 		console.error("Error in socket connection handling:", error);
 	}
